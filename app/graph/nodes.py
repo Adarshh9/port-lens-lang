@@ -1,0 +1,274 @@
+"""
+All graph nodes - MUST return pure dicts, never state objects.
+"""
+
+import logging
+import time
+from typing import Dict, Any
+from app.vector.retriever import Retriever
+from app.llm.groq_wrapper import GroqLLM
+from app.cache.fs_cache import FilesystemCache
+from app.cache.redis_cache import RedisCache
+from app.memory.short_term import ShortTermMemory
+from app.memory.long_term import LongTermMemory
+
+logger = logging.getLogger("rag_llm_system")
+
+
+def cache_node(state: Dict[str, Any], cache) -> Dict[str, Any]:
+    """Check cache for existing answer. RETURNS DICT."""
+    query = state.get("query", "")
+    logger.info(f"Checking cache for query: {query[:50]}")
+    
+    try:
+        session_id = state.get("session_id", "")
+        cache_key = f"{session_id}:{query}"
+        cached_answer = cache.get(cache_key)
+        
+        if cached_answer:
+            logger.info("Cache hit!")
+            return {
+                "cache_hit": True,
+                "cached_answer": cached_answer,
+                "final_answer": cached_answer
+            }
+        
+        logger.info("Cache miss")
+        return {"cache_hit": False}
+        
+    except Exception as e:
+        logger.error(f"Cache check failed: {str(e)}")
+        return {"cache_hit": False, "errors": state.get("errors", []) + [f"Cache error: {str(e)}"]}
+
+
+def retrieval_node(state: Dict[str, Any], retriever: Retriever) -> Dict[str, Any]:
+    """Retrieve documents. RETURNS DICT."""
+    if state.get("cache_hit"):
+        logger.info("Skipping retrieval due to cache hit")
+        return {}
+    
+    query = state.get("query", "")
+    logger.info(f"Retrieving documents for query: {query[:50]}")
+    start_time = time.time()
+    
+    try:
+        docs = retriever.retrieve(query, k=5)
+        
+        retrieved_docs = []
+        for doc in docs:
+            retrieved_docs.append({
+                "content": doc.get("content", "") if isinstance(doc, dict) else str(doc),
+                "metadata": doc.get("metadata", {}) if isinstance(doc, dict) else {},
+                "distance": doc.get("distance", 0.0) if isinstance(doc, dict) else 0.0
+            })
+        
+        logger.info(f"Retrieved {len(retrieved_docs)} documents in {time.time() - start_time:.2f}s")
+        
+        return {
+            "retrieved_docs": retrieved_docs,
+            "retrieval_metadata": {
+                "num_docs": len(retrieved_docs),
+                "retrieval_time": time.time() - start_time,
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Retrieval failed: {str(e)}")
+        return {
+            "retrieved_docs": [],
+            "retrieval_metadata": {"error": str(e)},
+            "errors": state.get("errors", []) + [f"Retrieval error: {str(e)}"]
+        }
+
+
+def llm_node(state: Dict[str, Any], llm: GroqLLM) -> Dict[str, Any]:
+    """Generate answer. RETURNS DICT."""
+    if state.get("cache_hit"):
+        logger.info("Skipping LLM generation due to cache hit")
+        return {}
+    
+    logger.info("Generating answer with LLM")
+    start_time = time.time()
+    
+    try:
+        query = state.get("query", "")
+        retrieved_docs = state.get("retrieved_docs", [])
+        conversation_history = state.get("conversation_history", [])
+        
+        context_parts = []
+        for i, doc in enumerate(retrieved_docs, 1):
+            content = doc.get("content", "") if isinstance(doc, dict) else str(doc)
+            if content:
+                context_parts.append(f"Document {i}:\n{content}")
+        
+        context = "\n\n".join(context_parts) if context_parts else "No relevant documents found."
+        
+        history_text = ""
+        if conversation_history:
+            history_items = []
+            for msg in conversation_history[-4:]:
+                role = msg.get("role", "") if isinstance(msg, dict) else ""
+                content = msg.get("content", "") if isinstance(msg, dict) else ""
+                history_items.append(f"{role}: {content}")
+            history_text = "\n".join(history_items)
+        
+        answer = llm.generate(
+            query=query,
+            context=context,
+            conversation_history=history_text
+        )
+        
+        generation_time = time.time() - start_time
+        logger.info(f"Generated answer in {generation_time:.2f}s")
+        
+        return {
+            "generated_answer": answer,
+            "generation_metadata": {
+                "context_length": len(context),
+                "generation_time": generation_time,
+                "num_context_docs": len(retrieved_docs),
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"LLM generation failed: {str(e)}")
+        return {
+            "generated_answer": "",
+            "generation_metadata": {"error": str(e)},
+            "errors": state.get("errors", []) + [f"Generation error: {str(e)}"]
+        }
+
+
+def judge_node(state: Dict[str, Any], llm: GroqLLM) -> Dict[str, Any]:
+    """Evaluate answer quality. RETURNS DICT."""
+    logger.info("Evaluating answer quality")
+    
+    if state.get("cache_hit"):
+        logger.info("Cache hit - skipping quality evaluation")
+        return {
+            "quality_passed": True,
+            "judge_score": 1.0,
+            "judge_evaluation": {
+                "score": 1.0,
+                "reasons": "Cached answer",
+                "criteria": {"cached": True}
+            },
+            "final_answer": state.get("cached_answer", "")
+        }
+    
+    generated_answer = state.get("generated_answer", "")
+    
+    if not generated_answer:
+        logger.warning("No answer generated - quality check failed")
+        return {
+            "quality_passed": False,
+            "judge_score": 0.0,
+            "judge_evaluation": {
+                "score": 0.0,
+                "reasons": "No answer generated",
+                "criteria": {}
+            },
+            "final_answer": ""
+        }
+    
+    try:
+        query = state.get("query", "")
+        retrieved_docs = state.get("retrieved_docs", [])
+        
+        evaluation = llm.judge_answer(
+            query=query,
+            answer=generated_answer,
+            context=retrieved_docs
+        )
+        
+        score = float(evaluation.get("score", 0.0))
+        from app.config import settings
+        threshold = settings.judge_quality_threshold
+        passed = score >= threshold
+        
+        logger.info(f"Answer quality score: {score:.2f} (threshold: {threshold}) - {'PASSED' if passed else 'FAILED'}")
+        
+        return {
+            "judge_score": score,
+            "judge_evaluation": evaluation,
+            "quality_passed": passed,
+            "final_answer": generated_answer if passed else ""
+        }
+        
+    except Exception as e:
+        logger.error(f"Quality evaluation failed: {str(e)}")
+        return {
+            "judge_score": 0.5,
+            "judge_evaluation": {
+                "score": 0.5,
+                "reasons": f"Evaluation error: {str(e)}",
+                "criteria": {}
+            },
+            "quality_passed": True,
+            "final_answer": generated_answer,
+            "errors": state.get("errors", []) + [f"Judge error: {str(e)}"]
+        }
+
+
+def memory_node(
+    state: Dict[str, Any],
+    short_term_memory: ShortTermMemory,
+    long_term_memory: LongTermMemory
+) -> Dict[str, Any]:
+    """Update memory. RETURNS DICT."""
+    logger.info("Updating memory")
+    
+    try:
+        query = state.get("query", "")
+        final_answer = state.get("final_answer", "")
+        session_id = state.get("session_id", "")
+        
+        if not final_answer:
+            return {}
+        
+        short_term_memory.add_message(
+            role="user",
+            content=query,
+            metadata={"session_id": session_id}
+        )
+        
+        short_term_memory.add_message(
+            role="assistant",
+            content=final_answer,
+            metadata={"session_id": session_id}
+        )
+        
+        if session_id:
+            short_term_memory.add_message_for_session(
+                session_id=session_id,
+                role="user",
+                content=query
+            )
+            short_term_memory.add_message_for_session(
+                session_id=session_id,
+                role="assistant",
+                content=final_answer
+            )
+        
+        updated_history = short_term_memory.get_history(session_id) if session_id else short_term_memory.get_messages()
+        
+        logger.info(f"Memory updated - history length: {len(updated_history)}")
+        
+        return {"conversation_history": updated_history}
+        
+    except Exception as e:
+        logger.error(f"Memory update failed: {str(e)}")
+        return {"errors": state.get("errors", []) + [f"Memory error: {str(e)}"]}
+
+
+def fallback_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Fallback response. RETURNS DICT."""
+    judge_score = state.get("judge_score", 0.0)
+    logger.warning(f"Fallback triggered (score: {judge_score})")
+    
+    from app.llm.prompts import FALLBACK_MESSAGE
+    
+    return {
+        "used_fallback": True,
+        "final_answer": FALLBACK_MESSAGE
+    }
