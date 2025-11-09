@@ -100,9 +100,10 @@ class RAGGraphBuilder:
         return judge_node(state, self.llm)
 
     def _memory_node(self, state: RAGState) -> Dict[str, Any]:
-        """Memory update node."""
+        """Memory update node - NOW WITH CACHE."""
         from app.graph.nodes import memory_node
-        return memory_node(state, self.short_term_memory, self.long_term_memory)
+        # PASS CACHE to memory_node so it can cache the answer
+        return memory_node(state, self.short_term_memory, self.long_term_memory, self.cache)
 
     def _fallback_node(self, state: RAGState) -> Dict[str, Any]:
         """Fallback response node."""

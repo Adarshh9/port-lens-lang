@@ -18,22 +18,28 @@ logger = logging.getLogger("rag_llm_system")
 def cache_node(state: Dict[str, Any], cache) -> Dict[str, Any]:
     """Check cache for existing answer. RETURNS DICT."""
     query = state.get("query", "")
+    session_id = state.get("session_id", "")
+    user_id = state.get("user_id", "")
+    
     logger.info(f"Checking cache for query: {query[:50]}")
     
     try:
-        session_id = state.get("session_id", "")
-        cache_key = f"{session_id}:{query}"
-        cached_answer = cache.get(cache_key)
+        # Use proper cache key with user_id
+        cached_answer = cache.get(
+            query=query,
+            session_id=session_id,
+            user_id=user_id
+        )
         
         if cached_answer:
-            logger.info("Cache hit!")
+            logger.info("✅ Cache HIT - returning cached answer")
             return {
                 "cache_hit": True,
                 "cached_answer": cached_answer,
                 "final_answer": cached_answer
             }
         
-        logger.info("Cache miss")
+        logger.info("Cache MISS - continuing to retrieval")
         return {"cache_hit": False}
         
     except Exception as e:
@@ -82,7 +88,7 @@ def retrieval_node(state: Dict[str, Any], retriever: Retriever) -> Dict[str, Any
 
 
 def llm_node(state: Dict[str, Any], llm: GroqLLM) -> Dict[str, Any]:
-    """Generate answer. RETURNS DICT."""
+    """Generate answer with IMPROVED context handling. RETURNS DICT."""
     if state.get("cache_hit"):
         logger.info("Skipping LLM generation due to cache hit")
         return {}
@@ -95,23 +101,33 @@ def llm_node(state: Dict[str, Any], llm: GroqLLM) -> Dict[str, Any]:
         retrieved_docs = state.get("retrieved_docs", [])
         conversation_history = state.get("conversation_history", [])
         
+        # IMPROVED: Better context formatting with doc numbers
         context_parts = []
         for i, doc in enumerate(retrieved_docs, 1):
             content = doc.get("content", "") if isinstance(doc, dict) else str(doc)
+            metadata = doc.get("metadata", {}) if isinstance(doc, dict) else {}
+            
             if content:
-                context_parts.append(f"Document {i}:\n{content}")
+                # Add document number and metadata
+                doc_header = f"Document {i}:"
+                if metadata.get("source"):
+                    doc_header += f" (Source: {metadata['source']})"
+                
+                context_parts.append(f"{doc_header}\n{content}")
         
         context = "\n\n".join(context_parts) if context_parts else "No relevant documents found."
         
+        # Build history
         history_text = ""
         if conversation_history:
             history_items = []
             for msg in conversation_history[-4:]:
                 role = msg.get("role", "") if isinstance(msg, dict) else ""
                 content = msg.get("content", "") if isinstance(msg, dict) else ""
-                history_items.append(f"{role}: {content}")
+                history_items.append(f"{role.upper()}: {content[:100]}")
             history_text = "\n".join(history_items)
         
+        # IMPROVED: Pass formatted context to LLM
         answer = llm.generate(
             query=query,
             context=context,
@@ -127,6 +143,7 @@ def llm_node(state: Dict[str, Any], llm: GroqLLM) -> Dict[str, Any]:
                 "context_length": len(context),
                 "generation_time": generation_time,
                 "num_context_docs": len(retrieved_docs),
+                "has_history": bool(conversation_history)
             }
         }
         
@@ -213,19 +230,24 @@ def judge_node(state: Dict[str, Any], llm: GroqLLM) -> Dict[str, Any]:
 def memory_node(
     state: Dict[str, Any],
     short_term_memory: ShortTermMemory,
-    long_term_memory: LongTermMemory
+    long_term_memory: LongTermMemory,
+    cache = None  # ADD CACHE PARAMETER
 ) -> Dict[str, Any]:
-    """Update memory. RETURNS DICT."""
-    logger.info("Updating memory")
+    """Update memory AND CACHE. RETURNS DICT."""
+    logger.info("Updating memory and cache")
     
     try:
         query = state.get("query", "")
         final_answer = state.get("final_answer", "")
         session_id = state.get("session_id", "")
+        user_id = state.get("user_id", "")
+        quality_passed = state.get("quality_passed", False)
+        used_fallback = state.get("used_fallback", False)
         
         if not final_answer:
             return {}
         
+        # Add to memories
         short_term_memory.add_message(
             role="user",
             content=query,
@@ -249,6 +271,21 @@ def memory_node(
                 role="assistant",
                 content=final_answer
             )
+        
+        # CACHE THE ANSWER if quality passed
+        if cache and quality_passed and not used_fallback:
+            try:
+                judge_score = state.get("judge_score", 0)
+                cache.set(
+                    query=query,
+                    answer=final_answer,
+                    session_id=session_id,
+                    user_id=user_id,
+                    metadata={"judge_score": judge_score}
+                )
+                logger.info("✅ Answer cached for future queries")
+            except Exception as cache_err:
+                logger.warning(f"Failed to cache answer: {cache_err}")
         
         updated_history = short_term_memory.get_history(session_id) if session_id else short_term_memory.get_messages()
         
