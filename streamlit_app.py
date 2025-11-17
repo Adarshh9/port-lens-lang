@@ -256,25 +256,151 @@ def format_response(response: dict) -> None:
 
 
 def update_query_stats(response: dict) -> None:
-    """Update query statistics."""
+    """Update query statistics with null safety."""
+    # SAFETY: Check if response is valid
+    if response is None:
+        logger.warning("Response is None, skipping stats update")
+        return
+    
+    if not isinstance(response, dict):
+        logger.warning(f"Response is not dict: {type(response)}, skipping stats update")
+        return
+    
     st.session_state.query_stats["total_queries"] += 1
     
-    if response.get("cache_hit"):
+    if response.get("cache_hit", False):
         st.session_state.query_stats["cache_hits"] += 1
     
-    # Update averages
-    stats = st.session_state.query_stats
-    processing_time = response.get("processing_time", 0)
-    judge_score = response.get("judge_evaluation", {}).get("score", 0)
+    # SAFETY: Handle missing judge_evaluation
+    judge_eval = response.get("judge_evaluation")
+    if judge_eval and isinstance(judge_eval, dict):
+        processing_time = response.get("processing_time", 0)
+        judge_score = judge_eval.get("score", 0)
+        
+        n = st.session_state.query_stats["total_queries"]
+        st.session_state.query_stats["avg_processing_time"] = (
+            (st.session_state.query_stats["avg_processing_time"] * (n - 1) + processing_time) / n
+        )
+        st.session_state.query_stats["avg_quality_score"] = (
+            (st.session_state.query_stats["avg_quality_score"] * (n - 1) + judge_score) / n
+        )
+    else:
+        logger.warning("judge_evaluation missing or invalid, using defaults")
+
+
+def send_query(query: str, user_id: str = "streamlit_user") -> dict:
+    """Send query with error handling."""
+    try:
+        payload = {
+            "query": query,
+            "session_id": st.session_state.session_id,
+            "user_id": user_id
+        }
+        
+        response = requests.post(QUERY_ENDPOINT, json=payload, timeout=30)
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Query Error: {response.status_code}")
+            logger.error(f"Query error: {response.text}")
+            return None  # IMPORTANT: Return None on error
+    except Exception as e:
+        st.error(f"Request Failed: {str(e)}")
+        logger.error(f"Request failed: {str(e)}")
+        return None  # Return None on error
+
+
+def format_response(response: dict) -> None:
+    """Display formatted query response with null safety."""
+    # SAFETY: Check if response is valid
+    if response is None:
+        st.error("No response received")
+        return
     
-    # Simple running average
-    n = stats["total_queries"]
-    stats["avg_processing_time"] = (
-        (stats["avg_processing_time"] * (n - 1) + processing_time) / n
-    )
-    stats["avg_quality_score"] = (
-        (stats["avg_quality_score"] * (n - 1) + judge_score) / n
-    )
+    if not isinstance(response, dict):
+        st.error(f"Invalid response type: {type(response)}")
+        return
+    
+    # Main answer
+    st.markdown("### 📝 Answer")
+    answer = response.get("answer") or response.get("final_answer")
+    if answer:
+        st.info(answer)
+    else:
+        st.warning("No answer generated")
+    
+    # Metrics row
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric(
+            "⏱️ Processing Time",
+            f"{response.get('processing_time', 0):.2f}s",
+            delta=None
+        )
+    
+    with col2:
+        cache_hit = response.get("cache_hit", False)
+        st.metric(
+            "💾 Cache Hit",
+            "Yes ✅" if cache_hit else "No ❌",
+            delta=None
+        )
+    
+    with col3:
+        quality = response.get("quality_passed", False)
+        st.metric(
+            "✔️ Quality",
+            "Passed" if quality else "Failed",
+            delta=None
+        )
+    
+    with col4:
+        # SAFETY: Handle missing judge_evaluation
+        judge_eval = response.get("judge_evaluation")
+        if judge_eval and isinstance(judge_eval, dict):
+            judge_score = judge_eval.get("score", 0)
+        else:
+            judge_score = 0
+        
+        st.metric(
+            "📊 Judge Score",
+            f"{judge_score:.2f}/1.0",
+            delta=None
+        )
+    
+    # Retrieved documents
+    st.markdown("### 📚 Retrieved Documents")
+    docs = response.get("retrieved_docs", [])
+    
+    if docs:
+        for idx, doc in enumerate(docs, 1):
+            with st.expander(f"📄 Document {idx}"):
+                st.markdown(doc.get("content", "No content"))
+                if doc.get("metadata"):
+                    st.caption(f"Metadata: {json.dumps(doc.get('metadata', {}))}")
+    else:
+        st.info("No documents retrieved")
+    
+    # Judge evaluation details
+    st.markdown("### 🔍 Judge Evaluation Details")
+    judge_eval = response.get("judge_evaluation")
+    
+    if judge_eval and isinstance(judge_eval, dict):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write(f"**Reasons:** {judge_eval.get('reasons', 'N/A')}")
+        
+        with col2:
+            criteria = judge_eval.get("criteria", {})
+            if criteria:
+                st.write("**Criteria Scores:**")
+                for key, value in criteria.items():
+                    st.write(f"- {key.capitalize()}: {value}")
+    else:
+        st.info("No judge evaluation available")
 
 
 # ============================================================================

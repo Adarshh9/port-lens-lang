@@ -6,6 +6,7 @@ Ensures ALL nodes return dicts, never state objects.
 import logging
 from typing import Union, Dict, Any, Callable
 from langgraph.graph import StateGraph, END
+from langsmith import traceable
 from app.graph.state import RAGState
 from app.vector.retriever import Retriever
 from app.llm.groq_wrapper import GroqLLM
@@ -189,7 +190,8 @@ class RAGGraphBuilder:
         except Exception as e:
             logger.error(f"Graph build failed: {str(e)}", exc_info=True)
             raise
-
+        
+    @traceable(run_type="chain", name="rag_pipeline")
     def invoke(self, state: RAGState) -> Dict[str, Any]:
         """
         Execute the graph.

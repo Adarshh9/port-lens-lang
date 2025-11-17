@@ -58,7 +58,7 @@ def retrieval_node(state: Dict[str, Any], retriever: Retriever) -> Dict[str, Any
     start_time = time.time()
     
     try:
-        docs = retriever.retrieve(query, k=5)
+        docs = retriever.retrieve(query, k=2)
         
         retrieved_docs = []
         for doc in docs:
@@ -104,7 +104,7 @@ def llm_node(state: Dict[str, Any], llm: GroqLLM) -> Dict[str, Any]:
         # IMPROVED: Better context formatting with doc numbers
         context_parts = []
         for i, doc in enumerate(retrieved_docs, 1):
-            content = doc.get("content", "") if isinstance(doc, dict) else str(doc)
+            content = doc.get("content", "")[:300] if isinstance(doc, dict) else str(doc)
             metadata = doc.get("metadata", {}) if isinstance(doc, dict) else {}
             
             if content:
@@ -131,7 +131,8 @@ def llm_node(state: Dict[str, Any], llm: GroqLLM) -> Dict[str, Any]:
         answer = llm.generate(
             query=query,
             context=context,
-            conversation_history=history_text
+            conversation_history=history_text,
+            max_tokens=1024
         )
         
         generation_time = time.time() - start_time

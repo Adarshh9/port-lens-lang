@@ -1,18 +1,8 @@
-"""
-Groq LLM wrapper for unified API access.
-Handles API calls to Groq models.
-"""
-
 import logging
 import json
 from typing import Optional, List, Dict, Any
 from groq import Groq
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_exponential,
-    retry_if_exception_type,
-)
+from tenacity import retry, stop_after_attempt, wait_exponential
 from app.config import settings
 from app.llm.prompts import (
     SYSTEM_PROMPT_RAG,
@@ -25,28 +15,23 @@ logger = logging.getLogger("rag_llm_system")
 
 
 class GroqLLM:
-    """Wrapper for Groq LLM API."""
+    """Groq LLM wrapper with robust error handling."""
 
     def __init__(self, model: str = settings.groq_model):
-        """
-        Initialize Groq LLM.
+        """Initialize Groq client."""
+        logger.info(f"Initializing Groq LLM: {model}")
         
-        Args:
-            model: Model name to use
-        """
-        logger.info(f"Initializing Groq LLM with model: {model}")
         try:
             self.client = Groq(api_key=settings.groq_api_key)
             self.model = model
-            logger.info("Groq LLM initialized successfully")
+            logger.info("✅ Groq LLM initialized")
         except Exception as e:
-            logger.error(f"Failed to initialize Groq LLM: {str(e)}")
+            logger.error(f"Failed to initialize Groq: {str(e)}")
             raise
 
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type(Exception),
     )
     def generate(
         self,
@@ -56,28 +41,16 @@ class GroqLLM:
         temperature: float = 0.7,
         max_tokens: int = 2048,
     ) -> str:
-        """
-        Generate answer to query using RAG.
-        
-        Args:
-            query: User query
-            context: Retrieved context documents
-            conversation_history: Previous conversation
-            temperature: Temperature for generation
-            max_tokens: Maximum tokens to generate
-            
-        Returns:
-            Generated answer
-        """
+        """Generate answer with retry logic."""
         logger.info(f"Generating answer for query (length: {len(query)})")
+        
         try:
-            # Build the prompt
+            # Build prompt
             prompt = RAG_PROMPT_TEMPLATE.format(
                 context=context or "No context available",
                 question=query
             )
             
-            # Add conversation history if available
             if conversation_history:
                 prompt = f"Previous conversation:\n{conversation_history}\n\n{prompt}"
             
@@ -85,26 +58,27 @@ class GroqLLM:
                 {"role": "system", "content": SYSTEM_PROMPT_RAG},
                 {"role": "user", "content": prompt}
             ]
-
+            
+            # Call Groq
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
-
+            
             answer = response.choices[0].message.content.strip()
             logger.info(f"Generated answer (length: {len(answer)})")
+            
             return answer
-
+            
         except Exception as e:
-            logger.error(f"Generation failed: {str(e)}", exc_info=True)
+            logger.error(f"Generation failed: {str(e)}")
             raise
 
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type(Exception),
     )
     def judge_answer(
         self,
@@ -113,22 +87,15 @@ class GroqLLM:
         context: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         """
-        Evaluate answer quality.
-        
-        Args:
-            query: Original query
-            answer: Generated answer
-            context: Retrieved context documents
-            
-        Returns:
-            Evaluation dict with score and criteria
+        Judge answer quality with robust JSON parsing.
+        Handles truncated, malformed, or incomplete responses.
         """
         try:
-            # Format context for judge
+            # Format context
             context_text = "\n\n".join([
-                doc.get("content", "")[:500]  # Limit context length
-                for doc in context[:3]  # Use top 3 docs
-            ]) if context else "No context available"
+                doc.get("content", "")[:200]
+                for doc in context[:3]
+            ]) if context else "No context"
             
             # Build judge prompt
             prompt = JUDGE_PROMPT_TEMPLATE.format(
@@ -143,95 +110,108 @@ class GroqLLM:
                 {"role": "system", "content": SYSTEM_PROMPT_JUDGE},
                 {"role": "user", "content": prompt}
             ]
-
+            
+            # Call judge with longer timeout
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                temperature=0.3,  # Lower temperature for consistent evaluation
+                temperature=0.3,
                 max_tokens=500,
             )
-
+            
             eval_text = response.choices[0].message.content.strip()
             
-            # Clean up response - remove markdown code blocks if present
-            if eval_text.startswith("```json"):
+            # Step 1: Extract JSON from markdown code blocks
+            if "```json" in eval_text:
                 eval_text = eval_text.split("```json")[1].split("```")[0].strip()
-            elif eval_text.startswith("```"):
+            elif "```" in eval_text:
                 eval_text = eval_text.split("```")[1].split("```")[0].strip()
             
-            # Parse JSON
+            # Step 2: Try parsing as-is
             try:
                 evaluation = json.loads(eval_text)
+                logger.info(f"Successfully parsed judge response")
             except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse judge response: {eval_text[:200]}")
-                # Return default evaluation
-                evaluation = {
-                    "score": 5.0,
-                    "reasons": "Failed to parse evaluation response",
-                    "criteria": {
-                        "correctness": 5.0,
-                        "relevance": 5.0,
-                        "completeness": 5.0,
-                        "clarity": 5.0,
-                        "citations": 5.0
-                    }
-                }
+                # Step 3: Try fixing common JSON issues
+                logger.warning(f"Initial JSON parse failed: {str(e)[:100]}")
+                evaluation = self._repair_json(eval_text)
+                
+                if evaluation is None:
+                    logger.error(f"Failed to repair JSON, using defaults")
+                    evaluation = self._get_default_evaluation()
             
-            # Normalize score to 0-1 range (from 0-10)
+            # Step 4: Validate and normalize score
             if "score" in evaluation:
-                evaluation["score"] = evaluation["score"] / 10.0
+                score = evaluation["score"]
+                
+                # Handle string scores
+                if isinstance(score, str):
+                    try:
+                        score = float(score)
+                    except ValueError:
+                        score = 5.0
+                
+                # Normalize to 0-1
+                if score > 10:
+                    evaluation["score"] = score / 100.0
+                elif score > 1:
+                    evaluation["score"] = score / 10.0
+                else:
+                    evaluation["score"] = score
+            else:
+                evaluation["score"] = 0.5
             
-            logger.info(f"Evaluation score: {evaluation.get('score', 0):.2f}")
+            final_score = float(evaluation.get("score", 0.5))
+            logger.info(f"Evaluation score: {final_score:.2f}")
+            
             return evaluation
-
+            
         except Exception as e:
-            logger.error(f"Evaluation failed: {str(e)}", exc_info=True)
-            # Return default evaluation on error
-            return {
-                "score": 0.5,
-                "reasons": f"Evaluation error: {str(e)}",
-                "criteria": {
-                    "correctness": 5.0,
-                    "relevance": 5.0,
-                    "completeness": 5.0,
-                    "clarity": 5.0,
-                    "citations": 5.0
-                }
-            }
+            logger.error(f"Judge failed: {str(e)}")
+            return self._get_default_evaluation()
 
-    def generate_with_context(
-        self,
-        prompt: str,
-        context: List[str],
-        temperature: float = 0.7,
-        max_tokens: int = 2048,
-        system_prompt: Optional[str] = None,
-    ) -> str:
+    def _repair_json(self, text: str) -> Optional[Dict[str, Any]]:
         """
-        Generate text with context documents (legacy method).
+        Attempt to repair malformed JSON.
         
-        Args:
-            prompt: Input prompt
-            context: List of context documents
-            temperature: Temperature for generation
-            max_tokens: Maximum tokens to generate
-            system_prompt: Optional system prompt
-            
-        Returns:
-            Generated text
+        Strategies:
+        1. Remove trailing incomplete keys
+        2. Add missing closing braces
+        3. Fix unquoted strings
+        4. Fix single quotes
         """
-        logger.info("Generating text with context (legacy method)")
+        text = text.strip()
+        
+        # Strategy 1: Remove truncated final key
+        if text.endswith('",'):
+            text = text[:-1]
+        
+        # Strategy 2: Add missing closing braces
+        open_braces = text.count('{') - text.count('}')
+        if open_braces > 0:
+            text += '}' * open_braces
+        
+        # Strategy 3: Replace single quotes with double quotes
+        # (be careful not to break strings containing apostrophes)
+        text = text.replace("'", '"')
+        
+        # Strategy 4: Try parsing again
         try:
-            context_str = "\n\n".join([f"Context {i+1}:\n{c}" for i, c in enumerate(context)])
-            
-            # Use the new generate method
-            return self.generate(
-                query=prompt,
-                context=context_str,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
+            return json.loads(text)
+        except json.JSONDecodeError:
+            logger.debug(f"Could not repair JSON: {text[:100]}")
+            return None
 
-        except Exception as e:
-            logger.error(f"Context-based generation failed: {str(e)}")
-            raise
+    def _get_default_evaluation(self) -> Dict[str, Any]:
+        """Return safe default evaluation."""
+        return {
+            "score": 0.5,
+            "reasons": "Evaluation failed - using default score",
+            "criteria": {
+                "correctness": 5,
+                "relevance": 5,
+                "completeness": 5,
+                "clarity": 5,
+                "citations": 5,
+            }
+        }

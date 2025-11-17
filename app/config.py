@@ -12,9 +12,10 @@ class Settings(BaseSettings):
     groq_model: str = "llama-3.1-8b-instant"  # Changed from openai/gpt-oss-20b
 
     # LangSmith
+    langsmith_tracing: bool = True
     langsmith_api_key: str = ""
     langsmith_project: str = "rag-llm-system"
-    langsmith_tracing_v2: bool = True
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
 
     # Vector DB (Chroma)
     chroma_db_path: str = "./data/chroma_db"
@@ -78,3 +79,11 @@ class Settings(BaseSettings):
 
 # Create global settings instance
 settings = Settings()
+
+# Configure LangSmith at import time
+if settings.langsmith_tracing and settings.langsmith_api_key:
+    os.environ["LANGCHAIN_TRACING_V2"] = "true"
+    os.environ["LANGCHAIN_API_KEY"] = settings.langsmith_api_key
+    os.environ["LANGCHAIN_PROJECT"] = settings.langsmith_project
+    os.environ["LANGCHAIN_ENDPOINT"] = settings.langsmith_endpoint
+    print("✅ LangSmith tracing enabled")

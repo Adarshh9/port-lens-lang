@@ -6,6 +6,7 @@ FIXED: Handle dict state returned from graph.
 import logging
 import time
 from fastapi import APIRouter, HTTPException
+from langsmith import traceable
 from app.api.schemas import (
     QueryRequest,
     QueryResponse,
@@ -33,6 +34,7 @@ def init_routes(graph_builder: RAGGraphBuilder, indexer) -> None:
 
 
 @router.post("/query", response_model=QueryResponse)
+@traceable(run_type="chain", name="api_query")
 async def query(request: QueryRequest) -> QueryResponse:
     """Process a query through the RAG system."""
     logger.info(f"Processing query: {request.query[:100]}")

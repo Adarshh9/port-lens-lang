@@ -1,1 +1,1 @@
-"""Tests module."""
+from app.config import settings

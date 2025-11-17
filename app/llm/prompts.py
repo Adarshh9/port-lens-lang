@@ -84,23 +84,8 @@ Format your response with:
 - Key takeaways if applicable
 - Any limitations or caveats based on the documents provided"""
 
-# RAG prompt template - IMPROVED context usage
-RAG_PROMPT_TEMPLATE = """Based on the following context documents, please answer the question:
-
-CONTEXT DOCUMENTS:
-{context}
-
-QUESTION: {question}
-
-Please provide a comprehensive answer that:
-1. Directly addresses the question
-2. References specific documents (e.g., "According to Document 1...")
-3. Provides concrete examples or details from the documents
-4. Clarifies any nuances or differences between concepts
-5. Acknowledges any limitations in the provided context"""
-
-# Judge prompt - STRICTER quality criteria
-JUDGE_PROMPT_TEMPLATE = """Evaluate the following answer based on these criteria:
+# Judge prompt - IMPROVED for better JSON
+JUDGE_PROMPT_TEMPLATE = """Evaluate the following answer based on these criteria.
 
 QUESTION: {question}
 
@@ -115,23 +100,38 @@ Rate the answer on a scale of 0-10 for each criterion:
 4. Clarity: Is the answer well-written and understandable?
 5. Citations: Does it properly reference the source documents?
 
-Provide your evaluation in this JSON format:
+IMPORTANT: Return ONLY a valid JSON object (no markdown, no extra text):
 {{
-    "score": <overall score 0-10>,
+    "score": <number 0-10>,
     "reasons": "<explanation of the score>",
     "criteria": {{
-        "correctness": <score>,
-        "relevance": <score>,
-        "completeness": <score>,
-        "clarity": <score>,
-        "citations": <score>
+        "correctness": <number 0-10>,
+        "relevance": <number 0-10>,
+        "completeness": <number 0-10>,
+        "clarity": <number 0-10>,
+        "citations": <number 0-10>
     }}
 }}
 
-Be strict: only give high scores if the answer excellently uses the provided context."""
+Return ONLY JSON. No additional text."""
+
+# RAG prompt template
+RAG_PROMPT_TEMPLATE = """Based on the following context documents, please answer the question:
+
+CONTEXT DOCUMENTS:
+{context}
+
+QUESTION: {question}
+
+Please provide a comprehensive answer that:
+1. Directly addresses the question
+2. References specific documents (e.g., "According to Document 1...")
+3. Provides concrete examples or details from the documents
+4. Clarifies any nuances or differences between concepts
+5. Acknowledges any limitations in the provided context"""
 
 # Fallback message
-FALLBACK_MESSAGE = """I apologize, but I was unable to generate a satisfactory answer to your question based on the available documents.
+FALLBACK_MESSAGE = """I apologize, but I was unable to generate a satisfactory answer to your question.
 
 Possible reasons:
 1. The documents don't contain relevant information
