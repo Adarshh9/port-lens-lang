@@ -11,6 +11,9 @@ from datetime import datetime
 from pathlib import Path
 import pandas as pd
 import plotly.graph_objects as go
+import logging
+
+logger = logging.getLogger("rag_llm_system")
 
 # ============================================================================
 # PAGE CONFIGURATION
