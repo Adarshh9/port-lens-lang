@@ -60,3 +60,5 @@ Thumbs.db
 test_documents/
 docker-compose.yml
 Dockerfile
+
+phi3-mini/

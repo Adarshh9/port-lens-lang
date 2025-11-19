@@ -1,8 +1,3 @@
-"""
-Main FastAPI application entry point.
-Initializes the RAG + LLM system.
-"""
-
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -11,6 +6,9 @@ from app.config import settings
 from app.logger import logger
 from app.router import AppRouter
 from app.api.routes import router as api_router, init_routes
+
+# NEW: Import routing router and init function
+from app.api.routes_with_routing import router as routing_router, init_routing
 
 # Global router
 _app_router: AppRouter = None
@@ -24,7 +22,14 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("RAG + LLM System starting up")
     _app_router = AppRouter()
+    
+    # Initialize legacy routes
     init_routes(_app_router.graph_builder, _app_router.indexer)
+    
+    # NEW: Initialize routing endpoints using the AppRouter's components
+    if _app_router.model_config and _app_router.retriever:
+        init_routing(_app_router.model_config, _app_router.retriever)
+    
     logger.info("System ready for requests")
 
     yield
@@ -36,14 +41,11 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     """
     Create and configure FastAPI application.
-    
-    Returns:
-        Configured FastAPI instance
     """
     app = FastAPI(
         title="RAG + LLM System",
-        description="Production-ready Retrieval Augmented Generation with LLM",
-        version="1.0.0",
+        description="Production-ready Retrieval Augmented Generation with LLM and Multi-Model Routing",
+        version="1.1.0",
         lifespan=lifespan,
     )
 
@@ -58,14 +60,18 @@ def create_app() -> FastAPI:
 
     # Include routes
     app.include_router(api_router)
+    
+    # NEW: Include the smart routing router
+    app.include_router(routing_router)
 
     # Health check
     @app.get("/")
     async def root():
         return {
             "message": "RAG + LLM System API",
-            "version": "1.0.0",
+            "version": "1.1.0",
             "status": "running",
+            "features": ["langgraph", "multi-model-routing"]
         }
 
     logger.info("FastAPI application created successfully")

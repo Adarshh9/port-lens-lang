@@ -1,0 +1,54 @@
+models:
+  # Small, fast, cheap - for simple queries
+  phi3_mini:
+    provider: "ollama"
+    endpoint: "http://localhost:11434"
+    model_name: "phi3-mini:latest"
+    cost_per_1k_tokens: 0.001
+    latency_ms_estimate: 800
+    context_window: 4096
+    quality_tier: "basic"
+    ideal_for:
+      - "simple_factual" 
+      - "definitions"
+    max_complexity: 0.4
+
+  # Medium - balanced performance
+  llama3_8b:
+    provider: "groq"
+    api_key: "${GROQ_API_KEY}"
+    model_name: "llama-3.1-8b-instant"
+    cost_per_1k_tokens: 0.02
+    latency_ms_estimate: 450
+    context_window: 8192
+    quality_tier: "good"
+    ideal_for:
+      - "reasoning"
+      - "complex_queries"
+    max_complexity: 0.8
+
+  # # Premium - best quality, high cost (Optional if you have an OpenAI Key)
+  # gpt4o_mini:
+  #   provider: "openai"
+  #   api_key: "${OPENAI_API_KEY}"
+  #   model_name: "gpt-4o-mini"
+  #   cost_per_1k_tokens: 0.15
+  #   latency_ms_estimate: 200
+  #   context_window: 128000
+  #   quality_tier: "excellent"
+  #   ideal_for:
+  #     - "multi_hop_reasoning"
+  #     - "expert_domain"
+  #   max_complexity: 1.0
+
+routing:
+  default_strategy: "balanced"
+  min_quality_score: 0.75
+  fallback_chain:
+    - "llama3_8b"
+    - "phi3_mini"
+  max_cost_per_query_usd: 0.05
+  complexity_thresholds:
+    simple: 0.3
+    medium: 0.6
+    complex: 1.0

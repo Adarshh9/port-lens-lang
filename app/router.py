@@ -1,8 +1,3 @@
-"""
-Main application router.
-Orchestrates all components.
-"""
-
 import logging
 from app.vector.store import VectorStore
 from app.vector.retriever import Retriever
@@ -16,6 +11,10 @@ from app.memory.short_term import ShortTermMemory
 from app.memory.long_term import LongTermMemory
 from app.graph.graph_builder import RAGGraphBuilder
 from app.config import settings
+
+# NEW IMPORTS for Routing
+from app.models.model_config import MultiModelConfig
+from app.routing.model_router import CostAwareRouter
 
 logger = logging.getLogger("rag_llm_system")
 
@@ -51,6 +50,16 @@ class AppRouter:
 
         # Initialize LLM
         self.llm = GroqLLM()
+
+        # NEW: Initialize Model Configuration & Router
+        try:
+            self.model_config = MultiModelConfig("config/models.yaml")
+            self.cost_router = CostAwareRouter(self.model_config)
+            logger.info("✅ Multi-model routing initialized in AppRouter")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to initialize Routing: {e}. Smart query will likely fail.")
+            self.model_config = None
+            self.cost_router = None
 
         # Initialize cache
         if settings.cache_type == "redis":

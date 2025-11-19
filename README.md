@@ -1,331 +1,185 @@
-# RAG + LLM System with LangGraph
+# Port Lens Lang: Hybrid Production RAG System
 
-A production-ready Retrieval Augmented Generation (RAG) system with LLM integration using LangChain, LangGraph, Groq API, and advanced orchestration.
+> **Status:** Production Ready (Phase 3)
+> **Architecture:** Hybrid (LangGraph Orchestration + Cost-Aware Routing)
+> **Models:** Llama 3.1 (Groq), Phi-3 (Ollama Local), GPT-4o (OpenAI)
 
-## Features
+A high-performance, modular Retrieval Augmented Generation (RAG) system engineered for cost-efficiency, resilience, and complexity handling. It features a dual-pipeline architecture that can orchestrate complex stateful workflows or route simple queries to local models to minimize costs.
 
-- **Advanced RAG Pipeline**: Multi-layer orchestration with LangGraph
-- **Groq LLM Integration**: Fast, reliable LLM inference
-- **Vector Database**: Chroma for persistent embeddings storage
-- **Multi-layer Memory**: Short-term (buffer) and long-term (persistent) memory
-- **LLM as Judge**: Automatic quality evaluation of generated responses
-- **Caching Layer**: Redis or filesystem-based caching
-- **Monitoring**: LangSmith integration for tracing
-- **REST API**: FastAPI-based production-ready API
-- **Docker Support**: Full containerization with Docker Compose
 
-## Architecture
 
-```
-User Query
-    ↓
-Cache Check (Fast retrieval if available)
-    ↓
-Document Retrieval (From vector store)
-    ↓
-LLM Generation (Using Groq)
-    ↓
-Quality Judge (Evaluates response)
-    ↓
-Fallback Check (If quality threshold not met)
-    ↓
-Memory Update (Store in short/long term)
-    ↓
-Response
-```
+## 🚀 Key Features
 
-## System Requirements
+### 1. Smart Multi-Model Routing (New)
+An intelligent routing layer that classifies query complexity and selects the optimal model to balance cost and performance.
+-   **Local First Strategy:** Routes simple factual queries to **Phi-3 Mini (via Ollama)** for $0 inference cost.
+-   **Cloud Fallback:** Automatically switches to **Groq (Llama 3.1)** or OpenAI if the local model fails or the query requires deep reasoning.
+-   **Resilience:** If a cloud provider goes down (e.g., 500 Internal Error), the system seamlessly falls back to local or alternative models.
+-   **Optimization Modes:** User-selectable strategies: `cost`, `speed`, `quality`, or `balanced`.
 
-- Python 3.11+
-- Redis (optional, for caching)
-- Docker & Docker Compose (optional)
+### 2. Advanced Graph Orchestration
+For complex workflows requiring memory and self-correction, utilizing **LangGraph**:
+-   **Stateful Execution:** Manages conversation history and retrieval state across turns.
+-   **LLM-as-a-Judge:** Automatically evaluates answer quality and triggers re-generation if the initial response is poor.
+-   **Hierarchical Caching:** L1 (Redis) for high-speed hits and L2 (SQLite) for persistent storage.
+-   **Persistent Memory:** Short-term (RAM) and Long-term (SQLite) conversational memory.
 
-## Installation
+---
 
-### 1. Clone Repository
+## 🛠️ Architecture
 
-```
-git clone <repository-url>
-cd rag-llm-system
-```
+The system operates via two primary pipelines managed by a central Router:
 
-### 2. Create Virtual Environment
+```mermaid
+graph LR
+    User -->|Query| API[FastAPI Gateway]
+    API -->|/query (Legacy)| Graph[LangGraph Pipeline]
+    API -->|/query/smart| Router[Smart Router]
+    
+    subgraph "Smart Routing Logic"
+        Router -->|Simple Query| Local[Ollama / Phi-3]
+        Router -->|Complex Query| Cloud[Groq / Llama-3]
+        Router -->|Expert Query| Premium[OpenAI / GPT-4o]
+        Local -.->|Fallback| Cloud
+    end
+    
+    Graph --> Nodes[Cache -> Retrieve -> Generate -> Judge]
+````
 
-```
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
+### Tech Stack
 
-### 3. Install Dependencies
+  * **Backend:** Python 3.11+, FastAPI, Uvicorn
+  * **Orchestration:** LangGraph, LangChain
+  * **Vector Store:** ChromaDB
+  * **Inference:**
+      * *Local:* Ollama (`phi3:mini`)
+      * *Fast Cloud:* Groq API (`llama-3.1-8b-instant`)
+      * *Premium Cloud:* OpenAI API (`gpt-4o-mini`)
+  * **Monitoring:** LangSmith, Custom JSON Logging
 
-```
+-----
+
+## ⚡ Setup & Installation
+
+### 1\. Prerequisites
+
+  * Python 3.10+
+  * [Ollama](https://ollama.com/) (Required for local routing)
+  * Git
+
+### 2\. Clone & Install
+
+```bash
+git clone [https://github.com/yourusername/port-lens-lang.git](https://github.com/yourusername/port-lens-lang.git)
+cd port-lens-lang
 pip install -r requirements.txt
 ```
 
-### 4. Configure Environment
+### 3\. Local Model Setup (Critical)
 
-Copy `.env.example` to `.env` and fill in your credentials:
+You must initialize the local model for the router to work.
 
-```
-cp .env.example .env
-```
+```bash
+# 1. Start Ollama in a separate terminal
+ollama serve
 
-Required environment variables:
-- `GROQ_API_KEY`: Your Groq API key
-- `LANGSMITH_API_KEY`: Your LangSmith API key (optional)
-
-### 5. Initialize Database
-
-```
-python -c "from app.memory.long_term import LongTermMemory; LongTermMemory()"
+# 2. Pull the specific model used in config
+ollama pull phi3:mini
 ```
 
-## Usage
+### 4\. Configuration
 
-### Start Development Server
+Create a `.env` file in the root directory:
 
-```
-python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-### Start with Docker
-
-```
-docker-compose up -d
+```ini
+GROQ_API_KEY=gsk_...
+OPENAI_API_KEY=sk_...  # Optional, system will skip if missing
+LANGSMITH_API_KEY=lsv2_... # Optional for tracing
 ```
 
-### Ingest Documents
+Ensure `config/models.yaml` exists. This file controls cost thresholds, routing logic, and model definitions.
 
-```
-curl -X POST http://localhost:8000/api/v1/ingest \
-  -H "Content-Type: application/json" \
-  -d '{"file_path": "path/to/document.pdf"}'
-```
+### 5\. Running the System
 
-### Query the System
-
-```
-curl -X POST http://localhost:8000/api/v1/query \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "What is machine learning?",
-    "session_id": "session_123",
-    "user_id": "user_123"
-  }'
+```bash
+python -m uvicorn app.main:app --reload
 ```
 
-### Health Check
+  * **API Docs:** `http://localhost:8000/docs`
+  * **Frontend:** `http://localhost:8501` (if running Streamlit)
 
-```
-curl http://localhost:8000/api/v1/health
-```
+-----
 
-## Configuration
+## 🔌 API Usage
 
-All configuration is managed through `.env` file. Key settings:
+### 🧠 Smart Query (Routing Enabled)
 
-- **LLM**: `GROQ_MODEL` (default: mixtral-8x7b-32768)
-- **Vector DB**: `CHROMA_DB_PATH`, `CHROMA_COLLECTION_NAME`
-- **Embeddings**: `EMBEDDING_MODEL` (default: sentence-transformers/all-MiniLM-L6-v2)
-- **Cache**: `CACHE_TYPE` (filesystem or redis)
-- **Judge**: `JUDGE_QUALITY_THRESHOLD` (default: 7.0/10)
-- **Memory**: `SHORT_TERM_MEMORY_MAX_MESSAGES` (default: 20)
+**Endpoint:** `POST /api/v1/query/smart`
 
-## API Endpoints
+Automatically selects the best model based on your strategy.
 
-### POST /api/v1/query
-
-Process a query through the RAG system.
-
-Request:
-```
+```json
 {
-  "query": "Your question here",
-  "session_id": "unique_session_id",
-  "user_id": "optional_user_id",
+  "query": "What is the capital of France?",
+  "optimize_for": "cost",
+  "user_id": "test_user"
+}
+```
+
+| Parameter | Options | Description |
+| :--- | :--- | :--- |
+| `optimize_for` | `cost` | Forces cheapest model (usually Local). |
+| | `speed` | Uses fastest model available (Local or Groq). |
+| | `quality` | Uses best capability model (GPT-4o/Llama 3). |
+| | `balanced` | (Default) Uses Complexity Classifier to decide. |
+
+### 🔄 Graph Query (Stateful)
+
+**Endpoint:** `POST /api/v1/query`
+
+Uses the full LangGraph pipeline with memory and caching.
+
+```json
+{
+  "query": "Explain the previous concept in more detail.",
+  "session_id": "session_123",
   "use_cache": true
 }
 ```
 
-Response:
-```
-{
-  "query": "Your question here",
-  "answer": "Generated answer",
-  "retrieved_docs": [...],
-  "judge_evaluation": {...},
-  "cache_hit": false,
-  "processing_time": 2.34,
-  "quality_passed": true
-}
+### 📄 Ingestion
+
+**Endpoint:** `POST /api/v1/ingest`
+
+```json
+{ "file_path": "./documents/whitepaper.pdf" }
 ```
 
-### POST /api/v1/ingest
+-----
 
-Ingest a document into the system.
-
-Request:
-```
-{
-  "file_path": "path/to/document.pdf"
-}
-```
-
-### GET /api/v1/health
-
-Health check endpoint.
-
-### GET /api/v1/cache/clear
-
-Clear the cache.
-
-## Testing
-
-Run all tests:
+## 📂 Project Structure
 
 ```
-pytest
+app/
+├── api/                 # Routes for Graph and Smart Routing
+├── graph/               # LangGraph Nodes, State, and Builder
+├── ingestion/           # PDF/Text Loaders & Chunking
+├── llm/                 # Multi-Provider Wrappers (Groq, Ollama, OpenAI)
+├── models/              # Configuration Logic
+├── routing/             # Query Classifier & Router Logic
+├── vector/              # ChromaDB & Retriever
+└── main.py              # App Entry Point
+config/
+└── models.yaml          # Routing strategies and model specs
 ```
 
-Run specific test:
+## 🧪 Testing
 
-```
-pytest tests/test_rag_flow.py -v
-```
+  * **Unit Tests:** `pytest tests/`
+  * **Router Debug:** `python debug_router.py` (Tests connection to all providers and simulates routing logic directly).
 
-Run with coverage:
+<!-- end list -->
 
-```
-pytest --cov=app tests/
-```
+````
 
-## Monitoring
-
-### LangSmith Integration
-
-Set `LANGSMITH_API_KEY` to enable tracing. Access traces at:
-https://smith.langchain.com/
-
-### Logging
-
-Logs are stored in `./logs/app.log` with JSON formatting for structured logging.
-
-Access logs:
-```
-tail -f logs/app.log
-```
-
-## Performance Optimization
-
-1. **Cache**: Enable Redis for better performance
-   ```
-   CACHE_TYPE=redis
-   REDIS_URL=redis://localhost:6379
-   ```
-
-2. **Embedding Model**: Use smaller models for faster inference
-   ```
-   EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
-   ```
-
-3. **Chunk Size**: Adjust for better retrieval
-   ```
-   CHUNK_SIZE=1024
-   CHUNK_OVERLAP=256
-   ```
-
-## Troubleshooting
-
-### Redis Connection Error
-
-Ensure Redis is running:
-```
-docker-compose up redis
-```
-
-### Out of Memory
-
-Reduce `SHORT_TERM_MEMORY_MAX_MESSAGES` or `CHUNK_SIZE`
-
-### Low Quality Responses
-
-Increase `JUDGE_QUALITY_THRESHOLD` or improve document ingestion
-
-## Development
-
-### Project Structure
-
-- `app/`: Main application code
-- `app/ingestion/`: Document loading and processing
-- `app/vector/`: Vector database operations
-- `app/llm/`: LLM integration
-- `app/memory/`: Memory management
-- `app/graph/`: LangGraph orchestration
-- `app/cache/`: Caching layer
-- `app/api/`: FastAPI routes
-- `tests/`: Unit and integration tests
-
-### Adding New Nodes
-
-1. Create file in `app/graph/nodes/`
-2. Implement async function with RAGState
-3. Add to graph in `graph_builder.py`
-4. Add edges for routing
-
-Example:
-```
-async def custom_node(state: RAGState) -> RAGState:
-    # Process state
-    return state
-```
-
-## Production Deployment
-
-### Using Docker
-
-```
-docker-compose -f docker-compose.yml up -d
-```
-
-### Using Kubernetes
-
-Generate deployment manifests and deploy:
-```
-kubectl apply -f k8s/deployment.yaml
-```
-
-### Environment Variables for Production
-
-```
-ENVIRONMENT=production
-DEBUG=false
-LANGSMITH_TRACING_V2=true
-JUDGE_ENABLE_FALLBACK=true
-CACHE_TYPE=redis
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create feature branch
-3. Commit changes
-4. Push to branch
-5. Create Pull Request
-
-## License
-
-MIT License
-
-## Support
-
-For issues and questions, open an issue on GitHub or contact the team.
-
-## Roadmap
-
-- [ ] Multi-model support
-- [ ] Fine-tuning pipeline
-- [ ] Advanced retrieval strategies
-- [ ] Web UI
-- [ ] Batch processing
-- [ ] Distributed processing
-```
+---
