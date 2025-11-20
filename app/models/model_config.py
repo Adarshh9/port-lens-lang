@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Dict, Any, List
 from dataclasses import dataclass
 from string import Template
+from dotenv import load_dotenv
 
 @dataclass
 class ModelConfig:
@@ -21,6 +22,7 @@ class ModelConfig:
 
 class MultiModelConfig:
     def __init__(self, config_path: str = "config/models.yaml"):
+        load_dotenv()
         config_file = Path(config_path)
         if not config_file.exists():
             # Create default if missing to prevent crash

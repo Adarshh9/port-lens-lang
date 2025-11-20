@@ -3,6 +3,7 @@ import time
 from typing import Dict, Any
 from abc import ABC, abstractmethod
 import logging
+from langsmith import traceable
 
 logger = logging.getLogger("rag_llm_system")
 
@@ -77,6 +78,7 @@ class MultiProviderLLM:
                 self.providers[name] = OllamaProvider(cfg.endpoint, cfg.model_name, cfg.cost_per_1k_tokens)
             # Add OpenAI here if needed
 
+    @traceable(run_type="llm", name="llm_generation")
     async def generate(self, model_name: str, prompt: str, max_tokens: int = 1024, temperature: float = 0.7) -> Dict[str, Any]:
         if model_name not in self.providers:
             raise ValueError(f"Model {model_name} not initialized")

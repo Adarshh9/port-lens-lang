@@ -13,6 +13,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import sqlite3
 import redis
+from langsmith import traceable
 from app.config import settings
 
 logger = logging.getLogger("rag_llm_system")
@@ -115,6 +116,7 @@ class HierarchicalCache:
         logger.debug(f"Generated cache key: {cache_key} for query: {query[:50]}")
         return cache_key
 
+    @traceable(run_type="tool", name="cache_check")
     def get(
         self,
         query: str,
@@ -191,6 +193,7 @@ class HierarchicalCache:
         logger.info(f"❌ CACHE_MISS - query: {query[:50]}")
         return None
 
+    @traceable(run_type="tool", name="cache_update")
     def set(
         self,
         query: str,

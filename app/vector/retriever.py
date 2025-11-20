@@ -6,6 +6,7 @@ import logging
 from typing import List, Dict, Any
 from app.vector.store import VectorStore
 from app.ingestion.embedder import EmbeddingGenerator
+from langsmith import traceable
 
 logger = logging.getLogger("rag_llm_system")
 
@@ -28,6 +29,7 @@ class Retriever:
         self.vector_store = vector_store
         self.embedding_generator = embedding_generator
 
+    @traceable(run_type="retriever", name="chroma_retrieval")
     def retrieve(
         self, query: str, k: int = 5
     ) -> List[Dict[str, Any]]:

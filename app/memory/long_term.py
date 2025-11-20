@@ -9,6 +9,7 @@ import json
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from pathlib import Path
+from langsmith import traceable
 from app.config import settings
 
 logger = logging.getLogger("rag_llm_system")
@@ -335,6 +336,7 @@ class LongTermMemory:
             logger.error(f"Failed to get user interactions: {str(e)}")
             return []
 
+    @traceable(run_type="tool", name="save_to_memory")
     def add_qa_pair(self, query: str, answer: str, metadata: Optional[Dict[str, Any]] = None) -> None:
         """
         Store a high-quality Q&A pair (Compatibility wrapper).

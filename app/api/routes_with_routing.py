@@ -2,7 +2,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 import logging
-import traceback # Added for detailed debug prints
+import traceback 
+from langsmith import traceable
 
 from app.routing.model_router import CostAwareRouter, RoutingResult
 from app.models.model_config import MultiModelConfig
@@ -30,23 +31,30 @@ class SmartQueryRequest(BaseModel):
 
 # REMOVED response_model=SmartQueryResponse temporarily for debugging
 @router.post("/query/smart")
-async def smart_query(request: SmartQueryRequest):
-    print(f"DEBUG: Received smart query request: {request.query}") # Direct console print
-    
-    if not _router or not _retriever:
-        print("DEBUG: Router or Retriever is None!")
-        raise HTTPException(status_code=500, detail="Routing system not initialized")
-    
+@traceable(run_type="chain", name="smart_query_endpoint")
+async def smart_query(request: SmartQueryRequest):    
     try:
-        # Step 1: Retrieve context
-        print("DEBUG: Starting Retrieval...")
-        docs = _retriever.retrieve(request.query, k=2)
-        print(f"DEBUG: Retrieved {len(docs)} docs")
+        # Retrieve
+        docs = _retriever.retrieve(request.query, k=4)
         
+        # CHECK FOR EMPTY CONTEXT
+        if not docs:
+            print("DEBUG: No documents found. Returning fallback.")
+            return {
+                "query": request.query,
+                "answer": "I searched Adarsh's portfolio but couldn't find any relevant documents matching your query.",
+                "model_used": "retrieval_check",
+                "judge_score": 0.0,
+                "stats": {
+                    "latency_ms": 0,
+                    "cost_usd": 0,
+                    "attempts": 0
+                }
+            }
+
         context = "\n\n".join([doc.get("content", "")[:500] for doc in docs])
         
-        # Step 2: Route and generate
-        print(f"DEBUG: calling router with optimize_for={request.optimize_for}")
+        # Route (This will now include Tracing)
         result: RoutingResult = await _router.route_and_generate(
             query=request.query,
             context=context,
@@ -55,7 +63,7 @@ async def smart_query(request: SmartQueryRequest):
         )
         print(f"DEBUG: Generation complete. Model: {result.model_used}")
 
-        # Step 3: Build Response (Manually, as a dict)
+        # Build Response (Manually, as a dict)
         response_data = {
             "query": request.query,
             "answer": result.answer,

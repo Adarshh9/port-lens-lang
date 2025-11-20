@@ -43,7 +43,7 @@ models:
 
 routing:
   default_strategy: "balanced"
-  min_quality_score: 0.75
+  min_quality_score: 0.6
   fallback_chain:
     - "llama3_8b"
     - "phi3_mini"
