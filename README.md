@@ -93,7 +93,7 @@ Each answer judged; fallback chain is always ready.
 
 ### 4. System Workflow (Detailed)
 
-```
+```mermaid
 flowchart TD
     Start[User Request or API Call]
     Start --> ChoosePipeline{Query Type?}
