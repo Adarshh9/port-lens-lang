@@ -90,13 +90,15 @@ Each answer judged; fallback chain is always ready.
 - **All layers share resources:** Vector db, memory, cache.
 - **Monitoring at every step:** Logs, traces, metrics.
 
+
+### 4. System Workflow (Detailed)
+
+```
 flowchart TD
     Start[User Request or API Call]
     Start --> ChoosePipeline{Query Type?}
-
     ChoosePipeline -->|Stateful or Conversational| GraphPipeline[Graph Pipeline - LangGraph]
     ChoosePipeline -->|Simple or Stateless| RouterPipeline[Smart Router Pipeline]
-
     %% Graph Pipeline
     GraphPipeline --> GCacheCheck[Cache Check]
     GCacheCheck -- No Hit --> GRetrieve[Retrieve from Vector DB]
@@ -108,47 +110,39 @@ flowchart TD
     GStore --> GResponse[Return Response]
     GReturnCached --> GResponse
     GFallback --> GResponse
-
     %% Smart Routing Pipeline
     RouterPipeline --> Classifier[Query Classifier - Complexity Score 0-1]
     Classifier -->|Simple <0.3| LocalLLM[Ollama - Phi3 Mini]
     Classifier -->|Medium <0.6| CloudLLM[Groq - Llama3]
     Classifier -->|Complex >=0.6| PremiumLLM[OpenAI - GPT-4o]
-
     LocalLLM --> LocalJudge[Judge Quality]
     CloudLLM --> CloudJudge[Judge Quality]
     PremiumLLM --> PremiumJudge[Judge Quality]
-
     LocalJudge -- Quality Pass --> SmartMem[Write to Short/Long Memory]
     CloudJudge -- Quality Pass --> SmartMem
     PremiumJudge -- Quality Pass --> SmartMem
-
     LocalJudge -- Fail or Error --> CloudLLM
     CloudJudge -- Fail or Error --> PremiumLLM
     LocalLLM -- Error or Exception --> CloudLLM
     CloudLLM -- Error or Exception --> PremiumLLM
-
     SmartMem --> SmartResp[Return Routed Response]
-
     %% Docs
     subgraph DataLayer
         VectorDB[ChromaDB Vector Store]
         RedisCache[Redis or FS Cache]
         SQLiteMem[SQLite Memory]
     end
-
     GRetrieve --> VectorDB
     GCacheCheck --> RedisCache
     GStore --> SQLiteMem
     SmartMem --> SQLiteMem
     RouterPipeline --> VectorDB
-
     %% Monitoring
     GJudge -.-> MonitorSynapse[Monitoring and Logging - LangSmith, Grafana]
     Classifier -.-> MonitorSynapse
     SmartResp -.-> MonitorSynapse
     GResponse -.-> MonitorSynapse
-
+```
 ***
 
 ## 🔥 Challenges & What Worked
