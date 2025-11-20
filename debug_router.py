@@ -1,12 +1,17 @@
 import asyncio
 import os
 import sys
+from dotenv import load_dotenv
 from app.models.model_config import MultiModelConfig
 from app.routing.model_router import CostAwareRouter
 from app.llm.multi_provider import MultiProviderLLM
 
 # Setup basic logging to console
 import logging
+
+# Load environment variables from .env file
+load_dotenv()
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("rag_llm_system")
 

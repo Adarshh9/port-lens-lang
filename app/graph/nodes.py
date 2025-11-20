@@ -356,7 +356,7 @@ def memory_node(
             logger.info(
                 f"✅ Evaluation complete: "
                 f"overall={eval_result.get('overall_score', 0):.2f}, "
-                f"retrieval={eval_result.get('retrieval', {}).get('context_relevance', {}).get('avg_score', 0):.2f}, "
+                f"retrieval={eval_result.get('retrieval', {}).get('context_relevance', 0):.2f}, "
                 f"generation={eval_result.get('generation', {}).get('avg_generation_score', 0):.2f}"
             )
         except Exception as eval_err:

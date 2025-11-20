@@ -334,3 +334,15 @@ class LongTermMemory:
         except Exception as e:
             logger.error(f"Failed to get user interactions: {str(e)}")
             return []
+
+    def add_qa_pair(self, query: str, answer: str, metadata: Optional[Dict[str, Any]] = None) -> None:
+        """
+        Store a high-quality Q&A pair (Compatibility wrapper).
+        """
+        meta = metadata or {}
+        # Extract IDs from metadata or use defaults
+        user_id = meta.get("user_id", "default_user")
+        session_id = meta.get("session_id", "default_session")
+        
+        # Delegate to existing method
+        self.store_interaction(user_id, session_id, query, answer, meta)
